@@ -332,6 +332,8 @@ class BaseTransformerEncoder(HybridBlock, Seq2SeqEncoder):
         self._scaled = scaled
         self._use_layer_norm_before_dropout = use_layer_norm_before_dropout
         self._scale_embed = scale_embed
+        self._dtype = 'float32'
+
         with self.name_scope():
             self.dropout_layer = nn.Dropout(dropout)
             self.layer_norm = _get_layer_norm(use_bert_encoder, units)
@@ -392,6 +394,10 @@ class BaseTransformerEncoder(HybridBlock, Seq2SeqEncoder):
         """
         return super(BaseTransformerEncoder, self).__call__(inputs, states, valid_length)
 
+    def cast(self, dtype):
+        self._dtype = dtype
+        super(BaseTransformerEncoder, self).cast(dtype)
+
     def forward(self, inputs, states=None, valid_length=None, steps=None): # pylint: disable=arguments-differ
         """
 
@@ -417,7 +423,8 @@ class BaseTransformerEncoder(HybridBlock, Seq2SeqEncoder):
         length = inputs.shape[1]
         if valid_length is not None:
             mask = mx.nd.broadcast_lesser(
-                mx.nd.arange(length, ctx=valid_length.context).reshape((1, -1)),
+                #F.arange(length, dtype=self._dtype).reshape((1, -1)), 
+                mx.nd.arange(length, ctx=valid_length.context, dtype=self._dtype).reshape((1, -1)),
                 valid_length.reshape((-1, 1)))
             mask = mx.nd.broadcast_axes(mx.nd.expand_dims(mask, axis=1), axis=1, size=length)
             if states is None:
@@ -889,8 +896,10 @@ class TransformerDecoder(HybridBlock, Seq2SeqDecoder):
         mem_length = mem_value.shape[1]
         if encoder_valid_length is not None:
             mem_masks = mx.nd.broadcast_lesser(
-                mx.nd.arange(mem_length, ctx=encoder_valid_length.context).reshape((1, -1)),
-                encoder_valid_length.reshape((-1, 1)))
+                #mx.nd.arange(mem_length, ctx=encoder_valid_length.context).reshape((1, -1)),
+                mx.nd.arange(mem_length, ctx=encoder_valid_length.context, dtype=encoder_valid_length.dtype).reshape((1, -1)),
+   
+             encoder_valid_length.reshape((-1, 1)))
             decoder_states.append(mem_masks)
         self._encoder_valid_length = encoder_valid_length
         return decoder_states

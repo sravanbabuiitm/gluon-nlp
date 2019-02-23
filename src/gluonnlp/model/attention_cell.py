@@ -24,12 +24,15 @@ __all__ = ['AttentionCell', 'MultiHeadAttentionCell', 'MLPAttentionCell', 'DotPr
 
 import math
 import mxnet as mx
+import numpy as np
 from mxnet.gluon.block import HybridBlock
 from mxnet.gluon import nn
 from .block import L2Normalization
 
 # TODO(sxjscience) Add mask flag to softmax operator. Think about how to accelerate the kernel
-def _masked_softmax(F, att_score, mask):
+#def _masked_softmax(F, att_score, mask):
+def _masked_softmax(F, att_score, mask, dtype):
+
     """Ignore the masked elements when calculating the softmax
 
     Parameters
@@ -46,7 +49,14 @@ def _masked_softmax(F, att_score, mask):
     """
     if mask is not None:
         # Fill in the masked scores with a very small value
-        att_score = F.where(mask, att_score, -1e18 * F.ones_like(att_score))
+        #att_score = F.where(mask, att_score, -1e18 * F.ones_like(att_score))
+        if np.dtype(dtype) == np.float32:
+            neg = -1e18
+        elif np.dtype(dtype) == np.float16:
+            neg = -10000
+        else:
+            raise ValueError('unexpected dtype: %s'%str(dtype))
+        att_score = F.where(mask, att_score, neg * F.ones_like(att_score))
         att_weights = F.softmax(att_score, axis=-1) * mask
     else:
         att_weights = F.softmax(att_score, axis=-1)
@@ -63,6 +73,13 @@ class AttentionCell(HybridBlock):
         out = cell(query, key, value, mask)
 
     """
+    def __init__(self, prefix=None, params=None):
+        self._dtype = np.float32
+        super(AttentionCell, self).__init__(prefix=prefix, params=params)
+			
+    def cast(self, dtype):
+        self._dtype = dtype
+        super(AttentionCell, self).cast(dtype)
     def _compute_weight(self, F, query, key, mask=None):
         """Compute attention weights based on the query and the keys
 
@@ -362,7 +379,8 @@ class MLPAttentionCell(AttentionCell):
                                    F.expand_dims(mapped_key, axis=1))
         mid_feat = self._act(mid_feat)
         att_score = self._attention_score(mid_feat).reshape(shape=(0, 0, 0))
-        att_weights = self._dropout_layer(_masked_softmax(F, att_score, mask))
+        att_weights = self._dropout_layer(_masked_softmax(F, att_score, mask, self._dtype))
+        #att_weights = self._dropout_layer(_masked_softmax(F, att_score, mask))
         return att_weights
 
 
@@ -467,5 +485,6 @@ class DotProductAttentionCell(AttentionCell):
         if self._scaled:
             query = F.contrib.div_sqrt_dim(query)
         att_score = F.batch_dot(query, key, transpose_b=True)
-        att_weights = self._dropout_layer(_masked_softmax(F, att_score, mask))
+        #att_weights = self._dropout_layer(_masked_softmax(F, att_score, mask))
+        att_weights = self._dropout_layer(_masked_softmax(F, att_score, mask, self._dtype))        
         return att_weights
